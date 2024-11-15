@@ -1,0 +1,103 @@
+import { ethers } from 'ethers';
+import React, { useState, useEffect } from 'react';
+import { useWeb3 } from './context/Web3Context';
+import Layout from './components/Layout';
+import ChatList from './components/ChatList';
+import ChatMessage from './components/ChatMessage';
+import MessageInput from './components/MessageInput';
+import { uploadToIPFS } from './utils/ipfs';
+import { formatAddress } from './utils/format';
+import { Input } from './components/ui/input';
+
+interface Message {
+  id: number;
+  sender: string;
+  messageType: number;
+  content: string;
+  timestamp: number;
+  amount: string;
+}
+
+const App: React.FC = () => {
+  const { account, contract, connectWallet } = useWeb3();
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [recipient, setRecipient] = useState('');
+
+  useEffect(() => {
+    if (contract) {
+      fetchMessages();
+    }
+  }, [contract]);
+
+  const fetchMessages = async () => {
+    try {
+      const fetchedMessages = await contract!.getMessages();
+      setMessages(fetchedMessages);
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    }
+  };
+
+  const handleSendMessage = async (content: string, type: number, file?: File, amount?: string) => {
+    try {
+      if (!recipient) {
+        alert("Please enter a recipient address");
+        return;
+      }
+
+      let finalContent = content;
+      if (file && (type === 1 || type === 2)) {
+        finalContent = await uploadToIPFS(file);
+      }
+
+      let tx;
+      if (type === 3 && amount) { // Payment
+        tx = await contract!.sendMessage(recipient, finalContent, type, {
+          value: ethers.utils.parseEther(amount)
+        });
+      } else {
+        tx = await contract!.sendMessage(recipient, finalContent, type);
+      }
+
+      await tx.wait();
+      fetchMessages();
+    } catch (error) {
+      console.error("Error sending message:", error);
+    }
+  };
+
+  return (
+    <Layout account={formatAddress(account)} onConnectWallet={connectWallet}>
+      <div className="flex flex-col h-full">
+        <div className="p-4 border-b">
+          <Input
+            placeholder="Enter recipient's Ethereum address (0x...)"
+            value={recipient}
+            onChange={(e) => setRecipient(e.target.value)}
+            className="w-full"
+          />
+        </div>
+        <div className="flex flex-1 overflow-hidden">
+          <ChatList messages={messages} onSelectChat={(sender) => setRecipient(sender)} />
+          <div className="flex-1 flex flex-col">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((msg) => (
+                <ChatMessage
+                  key={msg.id}
+                  sender={msg.sender}
+                  content={msg.content}
+                  timestamp={msg.timestamp}
+                  amount={msg.amount}
+                  currentAccount={account}
+                />
+              ))}
+            </div>
+            <MessageInput onSendMessage={handleSendMessage} />
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+};
+
+export default App;
